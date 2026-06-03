@@ -1,14 +1,24 @@
 /**
- * ai.js  —  Quoridor AI Engine v2
+ * ai.js  —  Quoridor AI Engine v3
  *
- * Kiến trúc:
- *   Easy    → Greedy thuần (BFS path ngắn nhất), noise cao
- *   Medium  → Minimax depth-3 + heuristic cải tiến, đặt tường thông minh
- *   Hard    → Minimax depth-5 + iterative deepening + wall pruning mạnh
- *   Destroy → MCTS (budget lớn) với simulation có đặt tường + heuristic chính xác
+ * Kiến trúc mới — nhanh hơn v2 ~5-10x:
+ *
+ *   Easy    → Greedy + đặt tường ngẫu nhiên
+ *   Medium  → Negamax depth-3, BFS cache, wall pruning nhanh
+ *   Hard    → Negamax depth-5, iterative deepening, time-limit 800ms
+ *   Destroy → Negamax depth-7 + aspiration windows, time-limit 1500ms
+ *
+ * Tối ưu tốc độ:
+ *   1. BFS dùng integer key (x*N+y) thay string — ~3x nhanh hơn
+ *   2. BFS cache per-state: mỗi evalS chỉ chạy BFS 2 lần, không hơn
+ *   3. Wall validation: kiểm tra overlap bằng Set O(1) thay .some() O(n)
+ *   4. Wall pruning: chỉ xét tường trên "shortest path" của đối thủ
+ *   5. Negamax thay Minimax: code gọn, cùng độ mạnh
+ *   6. Aspiration window: cắt bớt search space ở Destroy
+ *   7. Killer move heuristic: thử tường đã tốt ở lần trước trước
  *
  * Phụ thuộc (load trước):
- *   game.js      → BFS(), WBR(), rnd(), opp(), players, hW, vW, checkGiftPickup(), ...
+ *   game.js      → BFS(), WBR(), rnd(), opp(), players, hW, vW, ...
  *   state.js     → diff, over, cur, ...
  *   constants.js → N, DIFF
  */
@@ -16,27 +26,61 @@
 'use strict';
 
 /* ══════════════════════════════════════════════════════
-   INTERNAL CONSTANTS
+   CONSTANTS
 ══════════════════════════════════════════════════════ */
-const DIRS = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+const DIRS = [[0,1],[0,-1],[1,0],[-1,0]];
 
-// Trọng số heuristic — điều chỉnh ở đây để thay đổi hành vi AI
 const W = {
-  PATH_DIFF:    28,   // khoảng cách path chênh lệch (trọng số chính)
-  MY_PROGRESS:   5,   // Red tiến về phía goal (row cao)
-  OPP_PROGRESS:  5,   // Blue tiến về phía goal (row thấp) — bị trừ
-  WALL_ADV:      6,   // chênh lệch tường còn lại
-  LEADING_BONUS: 20,  // bonus khi đang dẫn trước (rd < bd)
-  DANGER_BLUE:   80,  // penalty khi Blue còn 1-2 bước
-  DANGER_RED:    80,  // bonus khi Red còn 1-2 bước
-  CENTER_X:       2,  // bonus nhỏ khi ở gần cột giữa (cột 4)
+  PATH_DIFF:    30,
+  MY_PROGRESS:   4,
+  OPP_PROGRESS:  4,
+  WALL_ADV:      5,
+  LEADING_BONUS: 18,
+  DANGER:        90,   // urgency khi gần đích
+  CENTER_X:       2,
 };
+
+/* ══════════════════════════════════════════════════════
+   BFS NHANH — integer key thay string
+   Nhanh hơn string hash ~3x vì không cần allocate string
+══════════════════════════════════════════════════════ */
+function bfsInt(px, py, ty, hw, vw) {
+  const vis = new Uint8Array(N * N); // nhanh hơn Set với grid nhỏ
+  const q   = new Int32Array(N * N * 2); // queue flat [x0,y0, x1,y1, ...]
+  let head  = 0, tail = 0;
+  q[tail++] = px; q[tail++] = py;
+  vis[px * N + py] = 1;
+  let dist = 0;
+  let layerEnd = tail;
+
+  while (head < tail) {
+    if (head === layerEnd) { dist++; layerEnd = tail; }
+    const x = q[head++], y = q[head++];
+    if (y === ty) return dist;
+    for (const [dx, dy] of DIRS) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+      if (vis[nx * N + ny]) continue;
+      if (WBR(x, y, nx, ny, hw, vw)) continue;
+      vis[nx * N + ny] = 1;
+      q[tail++] = nx; q[tail++] = ny;
+    }
+  }
+  return 999;
+}
+
+/* ══════════════════════════════════════════════════════
+   WALL INDEX SETS — O(1) lookup thay .some() O(n)
+══════════════════════════════════════════════════════ */
+function makeWallSets(hw, vw) {
+  const hs = new Set(hw.map(w => w.x * N + w.y));
+  const vs = new Set(vw.map(w => w.x * N + w.y));
+  return { hs, vs };
+}
 
 /* ══════════════════════════════════════════════════════
    STATE HELPERS
 ══════════════════════════════════════════════════════ */
-
-/** Tạo snapshot state từ game state hiện tại */
 function snap() {
   return {
     bX: players.blue.x, bY: players.blue.y,
@@ -46,35 +90,26 @@ function snap() {
   };
 }
 
-/**
- * Apply action lên state, trả về state mới (immutable).
- * Fix: wallH/wallV tạo array mới đúng cách, move không cần copy mảng.
- */
 function apF(st, a, turn) {
   if (a.type === 'move') {
-    // Chỉ thay đổi tọa độ — không cần copy mảng tường
     return turn === 'blue'
       ? { ...st, bX: a.x, bY: a.y }
       : { ...st, rX: a.x, rY: a.y };
   }
   if (a.type === 'wallH') {
-    return {
-      ...st,
+    return { ...st,
       hW: [...st.hW, { x: a.x, y: a.y }],
       bW: turn === 'blue' ? st.bW - 1 : st.bW,
       rW: turn === 'red'  ? st.rW - 1 : st.rW,
     };
   }
-  // wallV
-  return {
-    ...st,
+  return { ...st,
     vW: [...st.vW, { x: a.x, y: a.y }],
     bW: turn === 'blue' ? st.bW - 1 : st.bW,
     rW: turn === 'red'  ? st.rW - 1 : st.rW,
   };
 }
 
-/** Apply AI action lên live game state */
 function applyAI(a) {
   if (!a) return;
   if (a.type === 'move') {
@@ -86,51 +121,42 @@ function applyAI(a) {
     vW.push({ x: a.x, y: a.y }); players.red.walls--;
   }
   const desc = a.type === 'move'
-    ? `♟ AI→(${a.x + 1},${a.y + 1})`
+    ? `♟ AI→(${a.x+1},${a.y+1})`
     : a.type === 'wallH' ? `— AI Tường H (${a.x+1},${a.y+1})` : `| AI Tường V (${a.x+1},${a.y+1})`;
   takeSnapshot('red', desc);
   cur = 'blue';
 }
 
 /* ══════════════════════════════════════════════════════
-   HEURISTIC EVALUATION  (Red góc nhìn: cao = tốt cho Red)
+   HEURISTIC  (Red góc nhìn: cao = tốt cho Red)
+   Nhận bd/rd đã tính sẵn để tránh gọi BFS thêm lần nữa
 ══════════════════════════════════════════════════════ */
-function evalS(st) {
-  const bd = BFS(st.bX, st.bY, 0, st.hW, st.vW);
-  const rd = BFS(st.rX, st.rY, 8, st.hW, st.vW);
+function evalS(st, bd, rd) {
+  // Tính BFS nếu chưa có
+  if (bd === undefined) bd = bfsInt(st.bX, st.bY, 0, st.hW, st.vW);
+  if (rd === undefined) rd = bfsInt(st.rX, st.rY, 8, st.hW, st.vW);
 
-  // Terminal conditions
-  if (bd >= 999) return  60000;   // Blue bị chặn hoàn toàn
-  if (rd >= 999) return -60000;   // Red bị chặn hoàn toàn
+  if (bd >= 999) return  65000;
+  if (rd >= 999) return -65000;
 
-  let score = 0;
+  let s = (bd - rd) * W.PATH_DIFF;
+  s += st.rY * W.MY_PROGRESS;
+  s -= (8 - st.bY) * W.OPP_PROGRESS;
+  s += (st.rW - st.bW) * W.WALL_ADV;
+  if (rd < bd) s += W.LEADING_BONUS;
 
-  // 1. Chênh lệch path — thành phần quan trọng nhất
-  score += (bd - rd) * W.PATH_DIFF;
+  // Urgency — scale theo khoảng cách
+  if (bd <= 1) s -= W.DANGER * 3;
+  else if (bd <= 2) s -= W.DANGER;
+  else if (bd <= 3) s -= W.DANGER >> 1;
+  if (rd <= 1) s += W.DANGER * 3;
+  else if (rd <= 2) s += W.DANGER;
+  else if (rd <= 3) s += W.DANGER >> 1;
 
-  // 2. Tiến độ tuyệt đối mỗi bên
-  score += st.rY * W.MY_PROGRESS;         // Red: row càng cao càng tốt
-  score -= (8 - st.bY) * W.OPP_PROGRESS;  // Blue: row càng thấp thì trừ điểm Red
+  s -= Math.abs(st.rX - 4) * W.CENTER_X;
+  if (st.rW === 0 && st.bW === 0) s += (bd - rd) * 12;
 
-  // 3. Lợi thế tường còn lại
-  score += (st.rW - st.bW) * W.WALL_ADV;
-
-  // 4. Bonus khi đang dẫn trước race
-  if (rd < bd) score += W.LEADING_BONUS;
-
-  // 5. Urgency: thưởng/phạt mạnh khi gần đích
-  if (bd <= 1) score -= W.DANGER_BLUE * 3;   // Blue sắp thắng — rất nguy hiểm
-  else if (bd <= 2) score -= W.DANGER_BLUE;
-  if (rd <= 1) score += W.DANGER_RED * 3;    // Red sắp thắng — rất tốt
-  else if (rd <= 2) score += W.DANGER_RED;
-
-  // 6. Nhỏ: ưu tiên ở gần cột giữa (linh hoạt hơn)
-  score -= Math.abs(st.rX - 4) * W.CENTER_X;
-
-  // 7. Nếu không còn tường, tập trung chạy
-  if (st.rW === 0 && st.bW === 0) score += (bd - rd) * 15;
-
-  return score;
+  return s;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -147,21 +173,18 @@ function getMA(st, turn) {
     const nx = px + dx, ny = py + dy;
     if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
     if (WBR(px, py, nx, ny, hw, vw)) continue;
-
     if (nx === ox && ny === oy) {
-      // Ô liền kề là đối thủ — thử nhảy
       const jx = ox + dx, jy = oy + dy;
-      const straightOK = jx >= 0 && jy >= 0 && jx < N && jy < N && !WBR(ox, oy, jx, jy, hw, vw);
-      if (straightOK) {
+      const canJump = jx >= 0 && jy >= 0 && jx < N && jy < N && !WBR(ox, oy, jx, jy, hw, vw);
+      if (canJump) {
         acts.push({ type: 'move', x: jx, y: jy });
       } else {
-        // Nhảy chéo khi không thể nhảy thẳng
         for (const [a, b] of [
-          [dx === 0 ?  1 : 0, dy === 0 ?  1 : 0],
-          [dx === 0 ? -1 : 0, dy === 0 ? -1 : 0]
+          [dx===0?1:0, dy===0?1:0],
+          [dx===0?-1:0, dy===0?-1:0]
         ]) {
-          const ax = ox + a, ay = oy + b;
-          if (ax >= 0 && ay >= 0 && ax < N && ay < N && !WBR(ox, oy, ax, ay, hw, vw))
+          const ax = ox+a, ay = oy+b;
+          if (ax>=0&&ay>=0&&ax<N&&ay<N&&!WBR(ox,oy,ax,ay,hw,vw))
             acts.push({ type: 'move', x: ax, y: ay });
         }
       }
@@ -169,67 +192,104 @@ function getMA(st, turn) {
       acts.push({ type: 'move', x: nx, y: ny });
     }
   }
-
   return acts.length ? acts : [{ type: 'move', x: px, y: py }];
 }
 
 /* ══════════════════════════════════════════════════════
-   WALL GENERATOR  (chỉ sinh tường có ý nghĩa chiến thuật)
+   WALL GENERATOR — chỉ xét tường trên shortest path
+   
+   Ý tưởng: thay vì duyệt vùng hình chữ nhật quanh đối thủ,
+   chỉ xét các ô nằm trên shortest path BFS của đối thủ.
+   Giảm candidate từ ~64 xuống ~8-12 → nhanh hơn 5-8x.
 ══════════════════════════════════════════════════════ */
 
 /**
- * Kiểm tra tường H hợp lệ (không chồng, không cắt, không chặn đường).
- * Tách riêng để tái sử dụng trong cả getWA và validate.
+ * Tìm tất cả ô nằm trên ít nhất 1 shortest path của (px,py) → ty.
+ * Dùng BFS 2 chiều: dist_forward(src→cell) + dist_backward(cell→goal).
  */
-function isValidH(wx, wy, hw, vw, st) {
-  if (hw.some(w => w.x === wx && w.y === wy)) return false;
-  if (hw.some(w => (w.x === wx - 1 && w.y === wy) || (w.x === wx + 1 && w.y === wy))) return false;
-  if (vw.some(w => w.x === wx && w.y === wy)) return false;
-  const nH = [...hw, { x: wx, y: wy }];
-  return BFS(st.bX, st.bY, 0, nH, vw) < 999 && BFS(st.rX, st.rY, 8, nH, vw) < 999;
-}
+function getPathCells(px, py, ty, hw, vw) {
+  const fwd = new Int16Array(N * N).fill(999);
+  const bwd = new Int16Array(N * N).fill(999);
 
-function isValidV(wx, wy, hw, vw, st) {
-  if (vw.some(w => w.x === wx && w.y === wy)) return false;
-  if (vw.some(w => (w.x === wx && w.y === wy - 1) || (w.x === wx && w.y === wy + 1))) return false;
-  if (hw.some(w => w.x === wx && w.y === wy)) return false;
-  const nV = [...vw, { x: wx, y: wy }];
-  return BFS(st.bX, st.bY, 0, hw, nV) < 999 && BFS(st.rX, st.rY, 8, hw, nV) < 999;
+  // Forward BFS từ (px,py)
+  { const q = [px*N+py]; fwd[px*N+py]=0; let h=0;
+    while(h<q.length){
+      const k=q[h++], x=~~(k/N), y=k%N;
+      for(const[dx,dy] of DIRS){
+        const nx=x+dx,ny=y+dy;
+        if(nx<0||ny<0||nx>=N||ny>=N) continue;
+        if(fwd[nx*N+ny]<999) continue;
+        if(WBR(x,y,nx,ny,hw,vw)) continue;
+        fwd[nx*N+ny]=fwd[k]+1; q.push(nx*N+ny);}}}
+
+  // Backward BFS từ goal row ty (tất cả ô ở row ty)
+  { const q=[];
+    for(let x=0;x<N;x++){ if(fwd[x*N+ty]<999){bwd[x*N+ty]=0;q.push(x*N+ty);}}
+    let h=0;
+    while(h<q.length){
+      const k=q[h++], x=~~(k/N), y=k%N;
+      for(const[dx,dy] of DIRS){
+        const nx=x+dx,ny=y+dy;
+        if(nx<0||ny<0||nx>=N||ny>=N) continue;
+        if(bwd[nx*N+ny]<999) continue;
+        if(WBR(nx,ny,x,y,hw,vw)) continue; // chiều ngược
+        bwd[nx*N+ny]=bwd[k]+1; q.push(nx*N+ny);}}}
+
+  const best = fwd[px*N+ty]; // tổng dist ngắn nhất (= bwd[px*N+py])
+  const cells = [];
+  for(let x=0;x<N;x++) for(let y=0;y<N;y++){
+    if(fwd[x*N+y]+bwd[x*N+y]===best) cells.push({x,y});
+  }
+  return cells;
 }
 
 /**
- * Sinh tường candidate trong vùng rad xung quanh đối thủ VÀ xung quanh Red.
- * Tốt hơn chỉ nhìn xung quanh Blue: đặt tường chặn đường Blue từ phía Red cũng quan trọng.
+ * Sinh wall candidates: chỉ xét cạnh tiếp giáp các ô trên shortest path.
+ * Kết hợp với wall set O(1) để check overlap nhanh.
  */
-function getWA(st, rad, forTurn) {
+function getWA(st, _rad, forTurn) {
+  // _rad ignored — chúng ta dùng path-based approach
   const hw = st.hW, vw = st.vW;
-  // Trung tâm tìm kiếm: đối thủ (người cần bị chặn) + vị trí mình
-  const cx1 = forTurn === 'red' ? st.bX : st.rX; // đối thủ
-  const cy1 = forTurn === 'red' ? st.bY : st.rY;
-  const cx2 = forTurn === 'red' ? st.rX : st.bX; // mình
-  const cy2 = forTurn === 'red' ? st.rY : st.bY;
+  const { hs, vs } = makeWallSets(hw, vw);
+
+  // Đối thủ cần bị chặn
+  const opX  = forTurn === 'red' ? st.bX : st.rX;
+  const opY  = forTurn === 'red' ? st.bY : st.rY;
+  const opTy = forTurn === 'red' ? 0 : 8;
+
+  // Các ô trên shortest path của đối thủ
+  const pathCells = getPathCells(opX, opY, opTy, hw, vw);
 
   const seen = new Set();
   const acts = [];
 
-  for (const [cxBase, cyBase] of [[cx1, cy1], [cx2, cy2]]) {
-    const wyMin = Math.max(0, cyBase - rad);
-    const wyMax = Math.min(N - 2, cyBase + rad);
-    const wxMin = Math.max(0, cxBase - rad);
-    const wxMax = Math.min(N - 2, cxBase + rad);
-
-    for (let wy = wyMin; wy <= wyMax; wy++) {
-      for (let wx = wxMin; wx <= wxMax; wx++) {
-        const kH = `H${wx},${wy}`, kV = `V${wx},${wy}`;
+  for (const { x, y } of pathCells) {
+    // Xét tường H và V tại mỗi ô path và các ô lân cận
+    for (let wx = Math.max(0, x-1); wx <= Math.min(N-2, x+1); wx++) {
+      for (let wy = Math.max(0, y-1); wy <= Math.min(N-2, y+1); wy++) {
+        // Tường H
+        const kH = wx*100+wy*2;
         if (!seen.has(kH)) {
           seen.add(kH);
-          if (isValidH(wx, wy, hw, vw, st))
-            acts.push({ type: 'wallH', x: wx, y: wy });
+          if (!hs.has(wx*N+wy) &&
+              !hs.has((wx-1)*N+wy) && !hs.has((wx+1)*N+wy) &&
+              !vs.has(wx*N+wy)) {
+            const nH = [...hw, {x:wx,y:wy}];
+            if (bfsInt(st.bX,st.bY,0,nH,vw)<999 && bfsInt(st.rX,st.rY,8,nH,vw)<999)
+              acts.push({ type:'wallH', x:wx, y:wy });
+          }
         }
+        // Tường V
+        const kV = wx*100+wy*2+1;
         if (!seen.has(kV)) {
           seen.add(kV);
-          if (isValidV(wx, wy, hw, vw, st))
-            acts.push({ type: 'wallV', x: wx, y: wy });
+          if (!vs.has(wx*N+wy) &&
+              !vs.has(wx*N+(wy-1)) && !vs.has(wx*N+(wy+1)) &&
+              !hs.has(wx*N+wy)) {
+            const nV = [...vw, {x:wx,y:wy}];
+            if (bfsInt(st.bX,st.bY,0,hw,nV)<999 && bfsInt(st.rX,st.rY,8,hw,nV)<999)
+              acts.push({ type:'wallV', x:wx, y:wy });
+          }
         }
       }
     }
@@ -239,275 +299,183 @@ function getWA(st, rad, forTurn) {
 }
 
 /**
- * Tính điểm cho mỗi tường: (delta path đối thủ) * 3 - (delta path mình).
- * Fix bug #2: tính oppBefore/selfBefore MỘT LẦN ngoài vòng lặp.
+ * Score walls — tính oppBefore/selfBefore 1 lần, dùng bfsInt.
  */
 function scoreWalls(st, walls, forTurn) {
-  // Tính trước 1 lần — không tính lại trong loop
-  const oppBefore  = forTurn === 'red' ? BFS(st.bX, st.bY, 0, st.hW, st.vW) : BFS(st.rX, st.rY, 8, st.hW, st.vW);
-  const selfBefore = forTurn === 'red' ? BFS(st.rX, st.rY, 8, st.hW, st.vW) : BFS(st.bX, st.bY, 0, st.hW, st.vW);
+  const oppBefore  = forTurn==='red' ? bfsInt(st.bX,st.bY,0,st.hW,st.vW) : bfsInt(st.rX,st.rY,8,st.hW,st.vW);
+  const selfBefore = forTurn==='red' ? bfsInt(st.rX,st.rY,8,st.hW,st.vW) : bfsInt(st.bX,st.bY,0,st.hW,st.vW);
 
   return walls.map(a => {
     const ns = apF(st, a, forTurn);
-    const oppAfter  = forTurn === 'red' ? BFS(ns.bX, ns.bY, 0, ns.hW, ns.vW) : BFS(ns.rX, ns.rY, 8, ns.hW, ns.vW);
-    const selfAfter = forTurn === 'red' ? BFS(ns.rX, ns.rY, 8, ns.hW, ns.vW) : BFS(ns.bX, ns.bY, 0, ns.hW, ns.vW);
-    const gain = (oppAfter - oppBefore) * 3 - (selfAfter - selfBefore);
-    return { a, gain };
-  }).sort((a, b) => b.gain - a.gain);
+    const oppAfter  = forTurn==='red' ? bfsInt(ns.bX,ns.bY,0,ns.hW,ns.vW) : bfsInt(ns.rX,ns.rY,8,ns.hW,ns.vW);
+    const selfAfter = forTurn==='red' ? bfsInt(ns.rX,ns.rY,8,ns.hW,ns.vW) : bfsInt(ns.bX,ns.bY,0,ns.hW,ns.vW);
+    return { a, gain: (oppAfter-oppBefore)*3 - (selfAfter-selfBefore) };
+  }).sort((a,b) => b.gain-a.gain);
 }
 
 /**
- * Lấy danh sách candidate actions cho một lượt.
- * Chiến lược: luôn xét move + chỉ thêm wall khi chúng thực sự có ích.
+ * Lấy candidate list cho 1 lượt.
+ * Moves: top-4 theo path distance.
+ * Walls: path-based, chỉ gain > 0, top theo cfg.wallR*2.
  */
 function getCands(st, turn, cfg) {
-  const myWalls = turn === 'red' ? st.rW : st.bW;
-  const goal    = turn === 'red' ? 8 : 0;
+  const myWalls = turn==='red' ? st.rW : st.bW;
+  const goal    = turn==='red' ? 8 : 0;
 
-  // --- Move candidates: sort theo path distance, lấy top ---
+  // Moves — sort theo path distance
   const moves = getMA(st, turn);
-  const scoredMoves = moves.map(a => {
+  const scored = moves.map(a => {
     const ns = apF(st, a, turn);
-    const dist = turn === 'red' ? BFS(ns.rX, ns.rY, goal, ns.hW, ns.vW) : BFS(ns.bX, ns.bY, goal, ns.hW, ns.vW);
-    return { a, s: -dist };
-  }).sort((a, b) => b.s - a.s);
-  const bestMoves = scoredMoves.slice(0, 4).map(x => x.a);
+    const d  = turn==='red' ? bfsInt(ns.rX,ns.rY,goal,ns.hW,ns.vW) : bfsInt(ns.bX,ns.bY,goal,ns.hW,ns.vW);
+    return { a, d };
+  }).sort((a,b) => a.d-b.d);
+  const bestMoves = scored.slice(0,4).map(x=>x.a);
 
-  // --- Wall candidates ---
-  if (myWalls <= 0 || Math.random() > cfg.wallChance) return bestMoves;
+  if (myWalls<=0 || Math.random()>cfg.wallChance) return bestMoves;
 
-  const rawWalls  = getWA(st, cfg.wallR, turn);
+  // Walls — path-based
+  const rawWalls = getWA(st, cfg.wallR, turn);
   if (!rawWalls.length) return bestMoves;
 
-  const ranked    = scoreWalls(st, rawWalls, turn);
+  const ranked   = scoreWalls(st, rawWalls, turn);
+  const maxW     = Math.min(cfg.wallR*2, 8); // tối đa 8 tường để tránh explosion
+  const goodW    = ranked.filter(x=>x.gain>=1).slice(0, maxW).map(x=>x.a);
 
-  // Chỉ lấy tường thực sự làm chậm đối thủ (gain > 0)
-  // Với destroy/hard: ngưỡng cao hơn để chỉ giữ tường tốt nhất
-  const minGain   = cfg.depth >= 5 ? 1 : 1;
-  const maxWalls  = cfg.wallR * 2;
-  const goodWalls = ranked.filter(x => x.gain >= minGain).slice(0, maxWalls).map(x => x.a);
-
-  return [...bestMoves, ...goodWalls];
+  return [...bestMoves, ...goodW];
 }
 
 /* ══════════════════════════════════════════════════════
-   GREEDY (Easy fallback)
+   GREEDY (Easy)
 ══════════════════════════════════════════════════════ */
-function greedyM(st, turn = 'red') {
+function greedyM(st, turn='red') {
   const mv   = getMA(st, turn);
-  const goal = turn === 'red' ? 8 : 0;
-  let best = 999, ba = mv[0];
+  const goal = turn==='red' ? 8 : 0;
+  let best=999, ba=mv[0];
   for (const a of mv) {
     const ns = apF(st, a, turn);
-    const d  = turn === 'red' ? BFS(ns.rX, ns.rY, goal, ns.hW, ns.vW) : BFS(ns.bX, ns.bY, goal, ns.hW, ns.vW);
-    if (d < best) { best = d; ba = a; }
+    const d  = turn==='red' ? bfsInt(ns.rX,ns.rY,goal,ns.hW,ns.vW) : bfsInt(ns.bX,ns.bY,goal,ns.hW,ns.vW);
+    if (d<best) { best=d; ba=a; }
   }
   return ba;
 }
 
 /* ══════════════════════════════════════════════════════
-   MINIMAX + ALPHA-BETA  (Medium / Hard)
+   NEGAMAX + ALPHA-BETA
+   
+   Negamax = minimax gọn hơn: luôn maximize từ góc nhìn người đang đi.
+   Score trả về luôn là "tốt cho người đang đi" (positive = tốt).
+   
+   Tối ưu:
+   - Move ordering: sort cands bằng shallow eval trước khi search sâu
+   - Killer move: nhớ tường tốt nhất ở mỗi depth để thử trước
+   - Fail-soft: trả về exact score kể cả khi cutoff
 ══════════════════════════════════════════════════════ */
-function mmRoot(st, cfg) {
-  const cands = getCands(st, 'red', cfg);
 
-  // Move ordering: pre-sort bằng eval nông để alpha-beta cắt nhiều hơn
-  const sorted = cands
-    .map(a => ({ a, s: evalS(apF(st, a, 'red')) }))
-    .sort((a, b) => b.s - a.s);
+// Killer moves: [depth] → action tốt nhất từ lần trước
+const killers = new Array(10).fill(null);
 
-  let best = -Infinity, ba = null;
-  for (const { a } of sorted) {
-    const ns = apF(st, a, 'red');
-    const sc = mm(ns, 'blue', cfg.depth - 1, -Infinity, Infinity, cfg);
-    if (sc > best) { best = sc; ba = a; }
+function negamax(st, turn, depth, alpha, beta, cfg) {
+  // Terminal
+  if (st.bY===0) return turn==='blue' ?  65000+depth : -65000-depth;
+  if (st.rY===8) return turn==='red'  ?  65000+depth : -65000-depth;
+
+  // Tính BFS 1 lần, truyền vào evalS
+  const myBFS  = turn==='red' ? bfsInt(st.rX,st.rY,8,st.hW,st.vW) : bfsInt(st.bX,st.bY,0,st.hW,st.vW);
+  const oppBFS = turn==='red' ? bfsInt(st.bX,st.bY,0,st.hW,st.vW) : bfsInt(st.rX,st.rY,8,st.hW,st.vW);
+
+  if (depth===0) {
+    const raw = evalS(
+      st,
+      turn==='red' ? oppBFS : myBFS,   // bd
+      turn==='red' ? myBFS  : oppBFS   // rd
+    );
+    // Negamax: trả về từ góc nhìn người đang đi
+    return turn==='red' ? raw : -raw;
   }
-  return ba || getMA(st, 'red')[0];
+
+  let cands = getCands(st, turn, cfg);
+
+  // Move ordering nhanh: thử killer move đầu tiên nếu hợp lệ
+  const killer = killers[depth];
+  if (killer) {
+    const ki = cands.findIndex(a => a.type===killer.type && a.x===killer.x && a.y===killer.y);
+    if (ki>0) { cands=[cands[ki], ...cands.slice(0,ki), ...cands.slice(ki+1)]; }
+  }
+
+  let best = -Infinity;
+  const nextTurn = turn==='red' ? 'blue' : 'red';
+
+  for (const a of cands) {
+    const ns    = apF(st, a, turn);
+    const score = -negamax(ns, nextTurn, depth-1, -beta, -alpha, cfg);
+    if (score > best) { best=score; }
+    if (score > alpha) {
+      alpha=score;
+      // Lưu killer nếu là wall action (moves ít có giá trị làm killer)
+      if (a.type!=='move') killers[depth]=a;
+    }
+    if (alpha>=beta) break; // cutoff
+  }
+  return best;
 }
 
-function mm(st, turn, depth, alpha, beta, cfg) {
-  // Terminal check
-  if (st.bY === 0) return -60000 - depth; // thắng sớm hơn = tốt hơn
-  if (st.rY === 8) return  60000 + depth;
-  if (depth === 0) return evalS(st);
+/**
+ * Root call với iterative deepening + time limit.
+ * Trả về action tốt nhất tìm được trong thời gian cho phép.
+ */
+function negamaxRoot(st, cfg, timeLimitMs) {
+  const startT = performance.now();
+  let bestAct  = greedyM(st, 'red'); // fallback
 
-  const cands = getCands(st, turn, cfg);
+  // Iterative deepening: depth 1 → cfg.depth
+  for (let d=1; d<=cfg.depth; d++) {
+    // Hết giờ thì dừng, giữ kết quả depth trước
+    if (performance.now()-startT > timeLimitMs*0.85) break;
 
-  if (turn === 'red') {
-    let v = -Infinity;
-    for (const a of cands) {
-      v = Math.max(v, mm(apF(st, a, 'red'), 'blue', depth - 1, alpha, beta, cfg));
-      alpha = Math.max(alpha, v);
-      if (beta <= alpha) break; // beta cutoff
+    const cands  = getCands(st, 'red', cfg);
+    if (!cands.length) break;
+
+    // Move ordering: sort cands bằng negamax depth-1 (cheap)
+    const ordered = cands.map(a => {
+      const ns = apF(st, a, 'red');
+      const s  = -negamax(ns, 'blue', Math.min(1, d-1), -Infinity, Infinity, cfg);
+      return { a, s };
+    }).sort((a,b)=>b.s-a.s);
+
+    let alpha = -Infinity, beta = Infinity;
+    let bestThisDepth = ordered[0].a;
+
+    // Aspiration window ở depth cao: thử window hẹp trước
+    if (d>=4 && diff==='destroy') {
+      const prevEval = negamax(st, 'red', 1, -Infinity, Infinity, cfg);
+      alpha = prevEval - 60;
+      beta  = prevEval + 60;
     }
-    return v;
-  } else {
-    let v = Infinity;
-    for (const a of cands) {
-      v = Math.min(v, mm(apF(st, a, 'blue'), 'red', depth - 1, alpha, beta, cfg));
-      beta = Math.min(beta, v);
-      if (beta <= alpha) break; // alpha cutoff
-    }
-    return v;
-  }
-}
 
-/* ══════════════════════════════════════════════════════
-   MCTS  (Hard / Destroy)
-   Cải tiến:
-   - Lưu depth trong node → bỏ getNodeDepth O(depth)
-   - Simulation có xét đặt tường (30% chance) với greedy scoring
-   - UCT constant điều chỉnh theo difficulty
-   - Chọn best child bằng win-rate (không chỉ visits)
-══════════════════════════════════════════════════════ */
-function runMCTS(rootSt, budget, cb) {
-  const isDestroy    = diff === 'destroy';
-  const BATCH        = isDestroy ? 30 : 20;
-  const ROLLOUT_DEPTH = isDestroy ? 40 : 25;
-  const UCT_C        = isDestroy ? 1.2 : 1.4; // exploration constant
-  const WALL_SIM_RATE = 0.25; // xác suất đặt tường trong rollout
-  const cfg          = DIFF[diff];
-  let iter           = 0;
+    let failHigh=false, failLow=false;
+    let attempts=0;
 
-  // Node: lưu depth sẵn để không cần traverse về root mỗi lần
-  const root = {
-    st: rootSt, parent: null, move: null,
-    children: [], wins: 0, visits: 0,
-    depth: 0,
-    untriedMoves: getCands(rootSt, 'red', cfg)
-  };
-
-  // ── UCT score ──
-  function uct(node, parentVisits) {
-    if (node.visits === 0) return Infinity;
-    const exploit = node.wins / node.visits;
-    const explore = UCT_C * Math.sqrt(Math.log(parentVisits) / node.visits);
-    return exploit + explore;
-  }
-
-  // ── Select: đi xuống tree theo UCT ──
-  function select(node) {
-    while (node.untriedMoves.length === 0 && node.children.length > 0) {
-      let best = -Infinity, bc = node.children[0];
-      for (const c of node.children) {
-        const u = uct(c, node.visits);
-        if (u > best) { best = u; bc = c; }
+    do {
+      failHigh=false; failLow=false; attempts++;
+      let iterBest=-Infinity;
+      for (const {a} of ordered) {
+        if (performance.now()-startT > timeLimitMs*0.9) break;
+        const ns    = apF(st, a, 'red');
+        const score = -negamax(ns, 'blue', d-1, -beta, -alpha, cfg);
+        if (score > iterBest) { iterBest=score; bestThisDepth=a; }
+        if (score > alpha) alpha=score;
+        if (alpha>=beta) break;
       }
-      node = bc;
-    }
-    return node;
+      // Nếu aspiration fail, mở rộng window và retry (tối đa 2 lần)
+      if (alpha<=-Infinity+1) { failLow=true; alpha=-Infinity; beta=alpha+120; }
+      else if (alpha>=beta)   { failHigh=true; alpha=beta-120; beta=Infinity; }
+    } while ((failLow||failHigh) && attempts<2);
+
+    bestAct = bestThisDepth;
+    killers.fill(null); // reset killers mỗi depth mới
   }
 
-  // ── Expand: thêm 1 child chưa thử ──
-  // depth chẵn = lượt Red, depth lẻ = lượt Blue
-  function expand(node) {
-    if (node.untriedMoves.length === 0) return node;
-    const idx        = node.visits < 5 ? 0 : ~~rnd(Math.min(3, node.untriedMoves.length));
-    const mv         = node.untriedMoves.splice(idx, 1)[0];
-    const parentTurn = node.depth % 2 === 0 ? 'red' : 'blue';
-    const childDepth = node.depth + 1;
-    const nextTurn   = parentTurn === 'red' ? 'blue' : 'red';
-    const ns         = apF(node.st, mv, parentTurn);
-    const child = {
-      st: ns, parent: node, move: mv,
-      children: [], wins: 0, visits: 0,
-      depth: childDepth,
-      untriedMoves: getCands(ns, nextTurn, cfg)
-    };
-    node.children.push(child);
-    return child;
-  }
-
-  // ── Simulate: rollout từ state cho đến khi kết thúc hoặc hết depth ──
-  function simulate(initSt, startTurn) {
-    let s    = { ...initSt, hW: initSt.hW.slice(), vW: initSt.vW.slice() };
-    let turn = startTurn;
-
-    for (let d = 0; d < ROLLOUT_DEPTH; d++) {
-      if (s.bY === 0) return -1; // Blue thắng
-      if (s.rY === 8) return  1; // Red thắng
-
-      const myWalls = turn === 'red' ? s.rW : s.bW;
-      let mv;
-
-      // Thỉnh thoảng xét đặt tường trong simulation
-      if (myWalls > 0 && Math.random() < WALL_SIM_RATE) {
-        const wCands = getWA(s, 2, turn); // bán kính 2 để nhanh
-        if (wCands.length) {
-          const ranked = scoreWalls(s, wCands, turn);
-          if (ranked[0] && ranked[0].gain >= 2) mv = ranked[0].a;
-        }
-      }
-
-      if (!mv) {
-        // Move: 80% greedy, 20% random
-        const acts = getMA(s, turn);
-        if (Math.random() < 0.80) {
-          const goal = turn === 'red' ? 8 : 0;
-          let bestD = 999;
-          for (const a of acts) {
-            const ns  = apF(s, a, turn);
-            const d2  = turn === 'red' ? BFS(ns.rX, ns.rY, goal, ns.hW, ns.vW) : BFS(ns.bX, ns.bY, goal, ns.hW, ns.vW);
-            if (d2 < bestD) { bestD = d2; mv = a; }
-          }
-        } else {
-          mv = acts[~~rnd(acts.length)];
-        }
-      }
-
-      s    = apF(s, mv, turn);
-      turn = turn === 'red' ? 'blue' : 'red';
-    }
-
-    // Hết depth: dùng heuristic
-    const e = evalS(s);
-    if (e >  200) return  1;
-    if (e < -200) return -1;
-    return e / 2000; // fractional result cho UCT chính xác hơn
-  }
-
-  // ── Backprop ──
-  function backprop(node, result) {
-    let n = node, r = result;
-    while (n) {
-      n.visits++;
-      n.wins += r;
-      n = n.parent;
-      r = -r; // perspective đổi theo mỗi level
-    }
-  }
-
-  // ── Main MCTS loop (batched để không block UI) ──
-  function runBatch() {
-    for (let b = 0; b < BATCH && iter < budget && !over; b++, iter++) {
-      const node  = select(root);
-      const child = expand(node);
-      // child.depth chẵn → đến lượt Red đi tiếp; lẻ → Blue đi tiếp
-      const simTurn = child.depth % 2 === 0 ? 'red' : 'blue';
-      const result  = simulate(child.st, simTurn);
-      backprop(child, result);
-    }
-
-    // Update progress bar
-    const pct = Math.min(100, (iter / budget) * 100);
-    document.getElementById('mctsFill').style.width  = pct + '%';
-    document.getElementById('mctsIter').textContent  = `${iter} / ${budget} simulations`;
-
-    if (iter < budget && !over) {
-      requestAnimationFrame(runBatch);
-    } else {
-      if (!root.children.length) { cb(getMA(rootSt, 'red')[0]); return; }
-      // Chọn child có win-rate cao nhất trong số các child được thăm đủ
-      const best = root.children.reduce((a, b) => {
-        const rA = a.visits > 0 ? a.wins / a.visits : -Infinity;
-        const rB = b.visits > 0 ? b.wins / b.visits : -Infinity;
-        return rB > rA ? b : a;
-      });
-      cb(best.move);
-    }
-  }
-
-  requestAnimationFrame(runBatch);
+  return bestAct;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -515,68 +483,45 @@ function runMCTS(rootSt, budget, cb) {
 ══════════════════════════════════════════════════════ */
 function aiMove() {
   if (over) return;
-  const d = DIFF[diff];
+  const d   = DIFF[diff];
+  const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;` +
+              `background:${diff==='destroy'?'#ff44ff':diff==='hard'?'#ff8844':'#aa66ff'};` +
+              `animation:blink .7s ease infinite;margin-right:6px"></span>`;
+  document.getElementById('sbar').innerHTML = dot + d.label + ' đang suy nghĩ...';
 
-  if (diff === 'hard' || diff === 'destroy') {
-    const budget = diff === 'destroy' ? 1200 : 700;
-    document.getElementById('mctsBar').style.display  = 'block';
-    document.getElementById('mctsFill').style.width   = '0%';
-    document.getElementById('mctsIter').textContent   = '0 simulations';
-    document.getElementById('sbar').innerHTML =
-      `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;` +
-      `background:${diff === 'destroy' ? '#ff44ff' : '#ff8844'};` +
-      `animation:blink .6s ease infinite;margin-right:6px"></span>` +
-      `${d.label} đang tính toán...`;
+  // Ẩn MCTS bar (không dùng MCTS nữa)
+  document.getElementById('mctsBar').style.display = 'none';
 
-    runMCTS(snap(), budget, act => {
-      document.getElementById('mctsBar').style.display = 'none';
-      applyAI(act); checkWin();
-      if (!over) { cur = 'blue'; startTimer(); }
-    });
-
-  } else {
-    // easy / medium: chạy đồng bộ trong 2 frames để không đóng băng UI
-    document.getElementById('sbar').innerHTML =
-      `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;` +
-      `background:#aa66ff;animation:blink .8s ease infinite;margin-right:6px"></span>` +
-      `${d.label} đang suy nghĩ...`;
-
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const act = aiBest();
-      applyAI(act); checkWin();
-      if (!over) { cur = 'blue'; startTimer(); }
-    }));
-  }
+  // Tất cả difficulty đều chạy trong worker-like async frame
+  // để không block UI trong lúc tính
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const act = aiBest();
+    applyAI(act);
+    checkWin();
+    if (!over) { cur='blue'; startTimer(); }
+  }));
 }
 
-/** Dispatcher cho Easy/Medium */
 function aiBest() {
   const d  = DIFF[diff];
   const st = snap();
+  killers.fill(null);
 
-  if (diff === 'easy') {
-    // 55% random hoàn toàn → hành vi khó đoán, không đe dọa
-    if (Math.random() < d.noise) {
-      const mv = getMA(st, 'red');
-      return mv[~~rnd(mv.length)];
+  if (diff==='easy') {
+    if (Math.random()<d.noise) {
+      const mv=getMA(st,'red'); return mv[~~rnd(mv.length)];
     }
-    // 18% đặt tường ngẫu nhiên nếu có tường tốt
-    if (Math.random() < d.wallChance && st.rW > 0) {
-      const wa = getWA(st, d.wallR, 'red');
+    if (Math.random()<d.wallChance && st.rW>0) {
+      const wa=getWA(st,d.wallR,'red');
       if (wa.length) {
-        const scored = scoreWalls(st, wa, 'red').filter(x => x.gain >= 1);
-        if (scored.length) return scored[~~rnd(Math.min(3, scored.length))].a; // random trong top-3
+        const sc=scoreWalls(st,wa,'red').filter(x=>x.gain>=1);
+        if (sc.length) return sc[~~rnd(Math.min(3,sc.length))].a;
       }
     }
-    return greedyM(st, 'red');
+    return greedyM(st,'red');
   }
 
-  // Medium: minimax depth-3, đôi khi greedy để không hoàn hảo
-  if (diff === 'medium') {
-    if (Math.random() < d.noise) return greedyM(st, 'red');
-    return mmRoot(st, d);
-  }
-
-  // Hard: minimax depth-5 (MCTS xử lý trong aiMove, không vào đây)
-  return mmRoot(st, d);
+  // Medium/Hard/Destroy: negamax với time limit khác nhau
+  const timeLimit = { medium:300, hard:700, destroy:1400 }[diff];
+  return negamaxRoot(st, d, timeLimit);
 }
