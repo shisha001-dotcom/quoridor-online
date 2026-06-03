@@ -2,6 +2,11 @@
  * ai.js
  * AI engine: Easy (greedy), Medium (1-ply minimax),
  * Hard / Destroy (MCTS + Alpha-Beta minimax).
+ *
+ * Phụ thuộc (load trước):
+ *   - game.js  → BFS(), WBR(), rnd(), opp(), players, hW, vW, ...
+ *   - state.js → diff, over, cur, ...
+ *   - constants.js → N, DIFF
  */
 
 'use strict';
