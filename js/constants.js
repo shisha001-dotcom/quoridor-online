@@ -13,12 +13,16 @@ const C = 60;  // kích thước ô (px)
 
 /* ═══════════════════════════════
    DIFFICULTY CONFIG
+   wallChance : xác suất xét đặt tường mỗi lượt
+   wallR      : bán kính tìm tường candidate (ô)
+   noise      : xác suất đi ngẫu nhiên (easy only)
+   depth      : độ sâu minimax (medium/hard)
 ═══════════════════════════════ */
 const DIFF = {
-  easy:    { label: '🌿 Dễ',         wallChance: .18, wallR: 2, noise: .55, depth: 1 },
-  medium:  { label: '⚔️ Trung Bình',  wallChance: .55, wallR: 3, noise: .10, depth: 3 },
-  hard:    { label: '🔥 Khó',         wallChance: .90, wallR: 5, noise: .00, depth: 5 },
-  destroy: { label: '💀 Hủy Diệt',   wallChance: 1.0, wallR: 8, noise: .00, depth: 7 }
+  easy:    { label: '🌿 Dễ',         wallChance: .15, wallR: 2, noise: .50, depth: 1 },
+  medium:  { label: '⚔️ Trung Bình',  wallChance: .65, wallR: 3, noise: .08, depth: 3 },
+  hard:    { label: '🔥 Khó',         wallChance: .95, wallR: 4, noise: .00, depth: 5 },
+  destroy: { label: '💀 Hủy Diệt',   wallChance: 1.0, wallR: 5, noise: .00, depth: 7 }
 };
 
 /* ═══════════════════════════════
