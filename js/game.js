@@ -143,18 +143,23 @@ function takeSnapshot(who, desc) {
 /* ══════════════════════════════════
    END TURN
 ══════════════════════════════════ */
-function endTurn(timeout = false) {
-  if ((!acted && !timeout && !dblMove) || over) return;
-  if (gMode === 'online' && cur !== myOnlineRole && !timeout) return;
-  teleMode = false; dblMove = false; acted = false; hist = null;
-  turnN++;
-  cur = opp(cur);
 
+/**
+ * Xử lý các hiệu ứng cuối lượt: freeze, chaos, blind, fog.
+ * Được gọi bởi cả endTurn() (offline/AI) lẫn nextTurnOnline() (online)
+ * để đảm bảo hai máy luôn đồng bộ state.
+ *
+ * Lưu ý: cur đã được cập nhật sang người chơi TIẾP THEO trước khi gọi.
+ * Trả về true nếu cur bị freeze và bị bỏ lượt (đã xoay sang người kế).
+ */
+function _applyTurnEffects() {
   // Freeze: bỏ lượt nếu bị đóng băng
+  let didFreeze = false;
   if (powerMode && frozen[cur] > 0) {
     frozen[cur]--;
     showToast('❄️', 'Đóng băng!', `${cur === 'blue' ? '🔵 Blue' : '🔴 Red'} bị bỏ lượt!`);
     cur = opp(cur);
+    didFreeze = true;
   }
 
   if (powerMode) updPUBar();
@@ -175,10 +180,36 @@ function endTurn(timeout = false) {
     }
   }
 
+  // Fog of War: cập nhật vùng đã khám phá
   if (fogMode) updateFogReveal();
 
+  return didFreeze;
+}
+
+function endTurn(timeout = false) {
+  if ((!acted && !timeout && !dblMove) || over) return;
+  if (gMode === 'online' && cur !== myOnlineRole && !timeout) return;
+
+  teleMode = false; dblMove = false; acted = false; hist = null;
+  turnN++;
+  cur = opp(cur);
+
+  _applyTurnEffects();
+
   if (gMode === 'online') {
-    sendOnlineMove({ action: 'endturn', who: opp(cur) });
+    // Gửi toàn bộ context để peer đồng bộ đúng
+    sendOnlineMove({
+      action: 'endturn',
+      who: opp(cur), // người vừa đi xong
+      // Gửi kèm các counter để peer không cần tính lại
+      turnN,
+      chaosCounter,
+      blindCounter,
+      blindHideUntil,
+      chaosHideUntil,
+      frozen: JSON.parse(JSON.stringify(frozen)),
+      cur  // cur hiện tại sau khi đã xử lý freeze
+    });
     startTimer(); updPanels(); return;
   }
 
@@ -186,7 +217,9 @@ function endTurn(timeout = false) {
     clearInterval(tiv); updPanels();
     const delay = diff === 'destroy' ? 600 : diff === 'hard' ? 400 : 250;
     setTimeout(aiMove, delay);
-  } else startTimer();
+  } else {
+    startTimer();
+  }
 }
 
 /* ══════════════════════════════════
@@ -201,6 +234,8 @@ function WB(x1, y1, x2, y2) { return WBR(x1, y1, x2, y2, hW, vW); }
 
 /* ══════════════════════════════════
    BFS SHORTEST PATH
+   Dùng chung cho cả game.js và ai.js.
+   Chỉ khai báo ở đây — ai.js dùng trực tiếp.
 ══════════════════════════════════ */
 function BFS(px, py, ty, hw, vw) {
   const vis = new Set(), q = [{ x: px, y: py, d: 0 }]; vis.add(px + ',' + py);
@@ -215,19 +250,11 @@ function BFS(px, py, ty, hw, vw) {
   return 999;
 }
 
-/* Path còn thông sau khi đặt tường */
+/* Path còn thông sau khi đặt tường — dùng lại BFS, không duplicate traversal */
 function pathOK(pl, ty, hw, vw, eH, eV) {
-  const tH = eH ? [...hw, eH] : hw, tV = eV ? [...vw, eV] : vw;
-  const vis = new Set(), q = [{ x: pl.x, y: pl.y }]; vis.add(pl.x + ',' + pl.y);
-  while (q.length) {
-    const { x, y } = q.shift(); if (y === ty) return true;
-    for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= N || ny >= N || vis.has(nx + ',' + ny)) continue;
-      if (!WBR(x, y, nx, ny, tH, tV)) { vis.add(nx + ',' + ny); q.push({ x: nx, y: ny }); }
-    }
-  }
-  return false;
+  const tH = eH ? [...hw, eH] : hw;
+  const tV = eV ? [...vw, eV] : vw;
+  return BFS(pl.x, pl.y, ty, tH, tV) < 999;
 }
 
 /* ══════════════════════════════════
