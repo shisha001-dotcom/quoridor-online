@@ -242,7 +242,7 @@ function applyRemoteMove(move) {
     players[move.who].walls--;
   }
   else if (move.action === 'endturn') {
-    nextTurnOnline();
+    nextTurnOnline(move);
   }
   else if (move.action === 'undo') {
     // Đối thủ undo — khôi phục state họ gửi về
@@ -264,12 +264,49 @@ function applyRemoteMove(move) {
   }
 }
 
-function nextTurnOnline() {
+/**
+ * Được gọi khi nhận 'endturn' từ peer.
+ * Đồng bộ toàn bộ context (frozen, counters, cur) từ message của peer
+ * thay vì tự tính lại — tránh lệch state giữa 2 máy.
+ */
+function nextTurnOnline(msg) {
   acted = false; dblMove = false; teleMode = false;
   ghostWall = { x: -1, y: -1 };
   hist = null;
-  turnN++;
-  cur = opp(cur);
+
+  // Đồng bộ state từ peer (peer đã chạy _applyTurnEffects() và gửi kết quả)
+  if (msg) {
+    const prevBlindHide = blindHideUntil; // lưu trước khi ghi đè
+
+    turnN          = msg.turnN;
+    chaosCounter   = msg.chaosCounter;
+    blindCounter   = msg.blindCounter;
+    blindHideUntil = msg.blindHideUntil;
+    chaosHideUntil = msg.chaosHideUntil;
+    frozen         = msg.frozen;
+    const prevCur  = cur;
+    cur            = msg.cur; // đã xử lý freeze bên peer
+
+    // Hiển thị toast freeze nếu peer vừa bị skip lượt
+    if (prevCur !== cur && opp(prevCur) !== cur) {
+      // cur đã nhảy 2 lần → có freeze
+      showToast('❄️', 'Đóng băng!', `${cur === 'blue' ? '🔴 Red' : '🔵 Blue'} bị bỏ lượt!`);
+    }
+
+    // Hiển thị banner blind nếu peer vừa kích hoạt (blindHideUntil mới được set)
+    if (blindMode && blindHideUntil > prevBlindHide) {
+      showChaosBanner('🌫️ CỜ MÙ — TƯỜNG BIẾN MẤT 3 LƯỢT!', 'cb-fog');
+      showToast('🌫️', 'Cờ mù!', 'Tất cả tường ẩn trong 3 lượt tiếp theo!');
+    }
+
+    if (fogMode) updateFogReveal();
+  } else {
+    // Fallback nếu peer cũ không gửi context (backward compat)
+    turnN++;
+    cur = opp(cur);
+    if (fogMode) updateFogReveal();
+  }
+
   if (powerMode) updPUBar();
   startTimer(); updPanels();
 }
