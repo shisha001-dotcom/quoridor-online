@@ -20,9 +20,9 @@ const C = 60;  // kích thước ô (px)
    time limit : medium=300ms, hard=700ms, destroy=1400ms (trong ai.js)
 ═══════════════════════════════ */
 const DIFF = {
-  easy:    { label: '🌿 Dễ',         wallChance: .15, wallR: 2, noise: .50, depth: 1 },
-  medium:  { label: '⚔️ Trung Bình',  wallChance: .65, wallR: 3, noise: .08, depth: 4 },
-  hard:    { label: '🔥 Khó',         wallChance: .95, wallR: 4, noise: .00, depth: 6 },
+  easy:    { label: '🌿 Dễ',         wallChance: .20, wallR: 2, noise: .50, depth: 1 },
+  medium:  { label: '⚔️ Trung Bình',  wallChance: 1.0, wallR: 3, noise: .00, depth: 4 },
+  hard:    { label: '🔥 Khó',         wallChance: 1.0, wallR: 4, noise: .00, depth: 6 },
   destroy: { label: '💀 Hủy Diệt',   wallChance: 1.0, wallR: 5, noise: .00, depth: 8 }
 };
 
