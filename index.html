@@ -9,27 +9,25 @@
 </head>
 <body>
 
-<!-- ══ BACKGROUND ══ -->
 <div id="stars"></div>
 
-<!-- ══ TOAST NOTIFICATION ══ -->
 <div id="toast">
   <span class="t-ico" id="tIco"></span>
   <span class="t-nm"  id="tNm"></span>
   <div  class="t-ds"  id="tDs"></div>
 </div>
 
-<!-- ══════════════════════════════════════
-     SCREEN 0 · Main Menu
-══════════════════════════════════════ -->
+<!-- ══ SCREEN 0 · Main Menu ══ -->
 <div id="s0" class="scr on">
-  <div class="big-title">QUORIDOR</div>
-  <div class="big-sub">Tournament Edition</div>
-  <div class="prev-wrap"><canvas id="prev" width="108" height="108"></canvas></div>
+  <div class="logo-wrap">
+    <div class="big-title">QUORIDOR</div>
+    <div class="big-sub">Tournament Edition</div>
+  </div>
+  <div class="prev-wrap"><canvas id="prev" width="100" height="100"></canvas></div>
   <div class="card">
     <div class="clabel">Chọn chế độ chơi</div>
     <button class="btn b-ai"     onclick="nav('s1')"><span class="ic">🤖</span>Đấu với AI</button>
-    <div class="b-hint">4 mức độ khó · Alpha-Beta AI</div>
+    <div class="b-hint">4 mức độ khó · Negamax AI</div>
     <div class="csep"></div>
     <button class="btn b-2p"     onclick="nav('s2')"><span class="ic">🎮</span>Chơi 2 người</button>
     <div class="b-hint">👥 Cùng màn hình</div>
@@ -39,9 +37,7 @@
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     SCREEN 1 · AI Setup
-══════════════════════════════════════ -->
+<!-- ══ SCREEN 1 · AI Setup ══ -->
 <div id="s1" class="scr">
   <div class="scr-head">🤖 Đấu với AI</div>
   <div class="scr-sub">Chọn độ khó</div>
@@ -51,81 +47,74 @@
       <button class="dbtn d-easy sel" id="d0" onclick="pickDiff('easy',0)">
         <span class="em">🌿</span><span class="dl">Dễ</span><span class="ds">Newbie</span>
       </button>
-      <button class="dbtn d-med"      id="d1" onclick="pickDiff('medium',1)">
+      <button class="dbtn d-med" id="d1" onclick="pickDiff('medium',1)">
         <span class="em">⚔️</span><span class="dl">Trung Bình</span><span class="ds">Challenger</span>
       </button>
-      <button class="dbtn d-hard"     id="d2" onclick="pickDiff('hard',2)">
+      <button class="dbtn d-hard" id="d2" onclick="pickDiff('hard',2)">
         <span class="em">🔥</span><span class="dl">Khó</span><span class="ds">Expert</span>
       </button>
-      <button class="dbtn d-dest"     id="d3" onclick="pickDiff('destroy',3)">
+      <button class="dbtn d-dest" id="d3" onclick="pickDiff('destroy',3)">
         <span class="em">💀</span><span class="dl">Hủy Diệt</span><span class="ds">Terminator</span>
       </button>
     </div>
     <div class="csep"></div>
     <div class="clabel">Kiểu chơi</div>
-    <button class="btn b-norm"   onclick="launch('ai','normal')"><span class="ic">⚖️</span>Bình Thường</button>
+    <button class="btn b-norm"  onclick="launch('ai','normal')"><span class="ic">⚖️</span>Bình Thường</button>
     <div class="b-hint">Luật chuẩn Quoridor</div>
-    <button class="btn b-power"  onclick="launch('ai','power')"><span class="ic">⚡</span>Chế độ Power-up</button>
-    <div class="b-hint">🎁 Nhặt quà · Kỹ năng đặc biệt · Siêu vui</div>
-    <button class="btn b-chaos"  onclick="launch('ai','chaos')"><span class="ic">🌪️</span>Chaos Mode</button>
-    <div class="b-hint">💥 Sự kiện ngẫu nhiên mỗi 5 lượt · Cực kỳ hỗn loạn</div>
-    <button class="btn b-fog"    onclick="launch('ai','fog')"><span class="ic">👻</span>Fog of War</button>
-    <div class="b-hint">🌫️ Bán kính tầm nhìn 3 ô · Tường ẩn khi xa</div>
-    <button class="btn b-blind"  onclick="launch('ai','blind')"><span class="ic">🌫️</span>Cờ Mù</button>
+    <button class="btn b-power" onclick="launch('ai','power')"><span class="ic">⚡</span>Chế độ Power-up</button>
+    <div class="b-hint">🎁 Nhặt quà · Kỹ năng đặc biệt</div>
+    <button class="btn b-chaos" onclick="launch('ai','chaos')"><span class="ic">🌪️</span>Chaos Mode</button>
+    <div class="b-hint">💥 Sự kiện ngẫu nhiên mỗi 3 lượt</div>
+    <button class="btn b-fog"   onclick="launch('ai','fog')"><span class="ic">👻</span>Fog of War</button>
+    <div class="b-hint">🌫️ Bán kính tầm nhìn 3 ô</div>
+    <button class="btn b-blind" onclick="launch('ai','blind')"><span class="ic">🌫️</span>Cờ Mù</button>
     <div class="b-hint">👁️ Tường ẩn 3 lượt · Kích hoạt mỗi 4 lượt</div>
-    <button class="btn b-back"   onclick="nav('s0')">← Quay lại</button>
+    <button class="btn b-back"  onclick="nav('s0')">← Quay lại</button>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     SCREEN 2 · 2-Player Setup
-══════════════════════════════════════ -->
+<!-- ══ SCREEN 2 · 2-Player Setup ══ -->
 <div id="s2" class="scr">
   <div class="scr-head">🎮 Chơi 2 người</div>
   <div class="scr-sub">Chọn kiểu chơi</div>
   <div class="card">
     <div class="clabel">Kiểu chơi</div>
-    <button class="btn b-norm"   onclick="launch('2p','normal')"><span class="ic">⚖️</span>Bình Thường</button>
+    <button class="btn b-norm"  onclick="launch('2p','normal')"><span class="ic">⚖️</span>Bình Thường</button>
     <div class="b-hint">Luật chuẩn Quoridor</div>
-    <button class="btn b-power"  onclick="launch('2p','power')"><span class="ic">⚡</span>Chế độ Power-up</button>
-    <div class="b-hint">🎁 Nhặt quà · Kỹ năng đặc biệt · Siêu vui</div>
-    <button class="btn b-chaos"  onclick="launch('2p','chaos')"><span class="ic">🌪️</span>Chaos Mode</button>
-    <div class="b-hint">💥 Sự kiện ngẫu nhiên mỗi 5 lượt · Cực kỳ hỗn loạn</div>
-    <button class="btn b-fog"    onclick="launch('2p','fog')"><span class="ic">👻</span>Fog of War</button>
-    <div class="b-hint">🌫️ Bán kính tầm nhìn 3 ô · Tường ẩn khi xa</div>
-    <button class="btn b-blind"  onclick="launch('2p','blind')"><span class="ic">🌫️</span>Cờ Mù</button>
+    <button class="btn b-power" onclick="launch('2p','power')"><span class="ic">⚡</span>Chế độ Power-up</button>
+    <div class="b-hint">🎁 Nhặt quà · Kỹ năng đặc biệt</div>
+    <button class="btn b-chaos" onclick="launch('2p','chaos')"><span class="ic">🌪️</span>Chaos Mode</button>
+    <div class="b-hint">💥 Sự kiện ngẫu nhiên mỗi 3 lượt</div>
+    <button class="btn b-fog"   onclick="launch('2p','fog')"><span class="ic">👻</span>Fog of War</button>
+    <div class="b-hint">🌫️ Bán kính tầm nhìn 3 ô</div>
+    <button class="btn b-blind" onclick="launch('2p','blind')"><span class="ic">🌫️</span>Cờ Mù</button>
     <div class="b-hint">👁️ Tường ẩn 3 lượt · Kích hoạt mỗi 4 lượt</div>
-    <button class="btn b-back"   onclick="nav('s0')">← Quay lại</button>
+    <button class="btn b-back"  onclick="nav('s0')">← Quay lại</button>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     SCREEN 3 · Online Play
-══════════════════════════════════════ -->
+<!-- ══ SCREEN 3 · Online ══ -->
 <div id="s3" class="scr">
   <div class="scr-head">🌐 Chơi Online</div>
   <div class="scr-sub">Kết nối với bạn bè từ xa</div>
   <div class="card" style="max-width:400px;">
-
-    <!-- Chọn: tạo hoặc vào phòng -->
     <div id="onlineSetup">
       <div class="clabel">Bạn muốn</div>
       <button class="btn b-online" onclick="onlineCreate()"><span class="ic">🏠</span>Tạo phòng mới</button>
       <div class="b-hint">Tạo phòng &amp; gửi link cho bạn bè</div>
       <div class="csep"></div>
-      <div class="clabel">hoặc tham gia phòng</div>
+      <div class="clabel">Hoặc tham gia phòng</div>
       <input class="room-input" id="joinCodeInput" placeholder="NHẬP MÃ PHÒNG"
              maxlength="6" oninput="this.value=this.value.toUpperCase()">
-      <button class="btn b-norm" onclick="onlineJoin()" style="margin-top:4px">
+      <button class="btn b-norm" onclick="onlineJoin()" style="margin-top:6px">
         <span class="ic">🚪</span>Vào phòng
       </button>
     </div>
 
-    <!-- Đang chờ đối thủ (host) -->
     <div id="onlineWaiting" style="display:none">
-      <div class="clabel" style="margin-bottom:4px">Mã phòng của bạn</div>
+      <div class="clabel" style="margin-bottom:6px">Mã phòng của bạn</div>
       <div class="room-code" id="displayRoomCode">------</div>
-      <div style="display:flex;gap:6px;align-items:center;margin:4px 0 8px">
+      <div style="display:flex;gap:8px;align-items:center;margin:6px 0 10px">
         <div class="share-link" id="shareLinkBox" style="flex:1">Đang tạo link...</div>
         <button class="copy-btn" onclick="copyRoomLink()">📋 Copy</button>
       </div>
@@ -133,41 +122,34 @@
         <span class="cs-dot cs-dot-wait" id="csDot"></span>
         <span id="csText">Đang khởi tạo...</span>
       </div>
-      <div id="myRoleTag" style="text-align:center;margin:6px 0"></div>
+      <div id="myRoleTag" style="text-align:center;margin:8px 0"></div>
       <div class="opp-waiting" id="oppWaitText">⏳ Chờ đối thủ kết nối...</div>
-      <div class="csep" style="margin:8px 0"></div>
-      <div class="clabel">Kiểu chơi (chọn sau khi đối thủ vào)</div>
-      <button class="btn b-norm"   id="onlineStartNorm"  onclick="launchOnline('normal')"  style="display:none"><span class="ic">⚖️</span>Bình Thường</button>
-      <button class="btn b-power"  id="onlineStartPow"   onclick="launchOnline('power')"   style="display:none"><span class="ic">⚡</span>Power-up Mode</button>
-      <button class="btn b-chaos"  id="onlineStartChaos" onclick="launchOnline('chaos')"   style="display:none"><span class="ic">🌪️</span>Chaos Mode</button>
-      <button class="btn b-fog"    id="onlineStartFog"   onclick="launchOnline('fog')"     style="display:none"><span class="ic">👻</span>Fog of War</button>
-      <button class="btn b-blind"  id="onlineStartBlind" onclick="launchOnline('blind')"   style="display:none"><span class="ic">🌫️</span>Cờ Mù</button>
+      <div class="csep" style="margin:10px 0"></div>
+      <div class="clabel" style="margin-bottom:6px">Kiểu chơi (chọn sau khi đối thủ vào)</div>
+      <button class="btn b-norm"  id="onlineStartNorm"  onclick="launchOnline('normal')"  style="display:none"><span class="ic">⚖️</span>Bình Thường</button>
+      <button class="btn b-power" id="onlineStartPow"   onclick="launchOnline('power')"   style="display:none"><span class="ic">⚡</span>Power-up</button>
+      <button class="btn b-chaos" id="onlineStartChaos" onclick="launchOnline('chaos')"   style="display:none"><span class="ic">🌪️</span>Chaos Mode</button>
+      <button class="btn b-fog"   id="onlineStartFog"   onclick="launchOnline('fog')"     style="display:none"><span class="ic">👻</span>Fog of War</button>
+      <button class="btn b-blind" id="onlineStartBlind" onclick="launchOnline('blind')"   style="display:none"><span class="ic">🌫️</span>Cờ Mù</button>
     </div>
 
-    <!-- Đang kết nối (guest) -->
-    <div id="onlineConnecting" style="display:none;text-align:center;padding:10px 0">
-      <div class="conn-status cs-wait" style="justify-content:center;margin-bottom:10px">
+    <div id="onlineConnecting" style="display:none;text-align:center;padding:12px 0">
+      <div class="conn-status cs-wait" style="justify-content:center;margin-bottom:12px">
         <span class="cs-dot cs-dot-wait"></span>
         <span id="joiningText">Đang kết nối...</span>
       </div>
-      <div id="joiningRoleTag" style="text-align:center;margin:6px 0"></div>
+      <div id="joiningRoleTag" style="text-align:center;margin:8px 0"></div>
     </div>
 
-    <button class="btn b-back" onclick="cancelOnline()" style="margin-top:6px">← Quay lại</button>
+    <button class="btn b-back" onclick="cancelOnline()" style="margin-top:8px">← Quay lại</button>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     CHAOS BANNER
-══════════════════════════════════════ -->
+<!-- ══ CHAOS BANNER ══ -->
 <div id="chaosBanner"></div>
 
-<!-- ══════════════════════════════════════
-     GAME SCREEN
-══════════════════════════════════════ -->
+<!-- ══ GAME SCREEN ══ -->
 <div id="game">
-
-  <!-- Header -->
   <div class="gh">
     <button class="bkbtn" onclick="goMenu()">← Menu</button>
     <div class="g-logo">QUORIDOR</div>
@@ -177,7 +159,6 @@
     </div>
   </div>
 
-  <!-- Player Panels -->
   <div class="panels">
     <div id="pBlue" class="panel blue">
       <div class="pn">🔵 BLUE</div>
@@ -193,7 +174,6 @@
     </div>
   </div>
 
-  <!-- Power-up Bar -->
   <div id="puBar">
     <div class="pu-slots">
       <div class="pu-slot empty" id="puSlotBlue">
@@ -201,7 +181,7 @@
         <span class="pu-nm" id="puNmBlue">Trống</span>
         <button class="pu-use-btn inactive" id="puUseBtnBlue" onclick="activatePU('blue')">Dùng</button>
       </div>
-      <div style="font-size:10px;color:#333;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;">KỸ NĂNG</div>
+      <div class="pu-sep">KỸ NĂNG</div>
       <div class="pu-slot empty" id="puSlotRed">
         <span class="pu-ico">🎁</span>
         <span class="pu-nm" id="puNmRed">Trống</span>
@@ -210,46 +190,34 @@
     </div>
   </div>
 
-  <!-- AI Thinking Bar (thay MCTS bar — dùng chung cho mọi difficulty) -->
   <div id="mctsBar">
     <div class="mcts-wrap">
       <div class="mcts-label">
         <span id="mctsIter">🤖 AI đang tính toán...</span>
         <span id="mctsDiff"></span>
       </div>
-      <div class="mcts-track">
-        <div class="mcts-fill" id="mctsFill" style="width:0%"></div>
-      </div>
+      <div class="mcts-track"><div class="mcts-fill" id="mctsFill" style="width:0%"></div></div>
     </div>
   </div>
 
-  <!-- Timer -->
   <div class="twrap">
     <div class="tbg"><div id="tbar" class="tbar" style="width:100%"></div></div>
     <div id="ttxt" class="ttxt">⏱ 60s</div>
   </div>
 
-  <!-- Controls -->
   <div class="ctrls">
-    <button id="mBtn" class="cbtn"    onclick="setMode('move')">♟ Di chuyển</button>
-    <button id="hBtn" class="cbtn"    onclick="setMode('H')">— Tường H</button>
-    <button id="vBtn" class="cbtn"    onclick="setMode('V')">| Tường V</button>
-    <button class="cbtn dd"           onclick="undo()">↩ Hoàn tác</button>
-    <button class="cbtn ss"           onclick="endTurn()">✓ Kết thúc</button>
+    <button id="mBtn" class="cbtn" onclick="setMode('move')">♟ Di chuyển</button>
+    <button id="hBtn" class="cbtn" onclick="setMode('H')">— Tường H</button>
+    <button id="vBtn" class="cbtn" onclick="setMode('V')">| Tường V</button>
+    <button class="cbtn dd" onclick="undo()">↩ Hoàn tác</button>
+    <button class="cbtn ss" onclick="endTurn()">✓ Kết thúc</button>
   </div>
 
-  <!-- Board Canvas -->
-  <div class="cwrap">
-    <canvas id="board" width="540" height="540"></canvas>
-  </div>
-
-  <!-- Status Bar -->
+  <div class="cwrap"><canvas id="board" width="540" height="540"></canvas></div>
   <div class="sbar" id="sbar">Đang tải...</div>
 </div>
 
-<!-- ══════════════════════════════════════
-     WINNER OVERLAY
-══════════════════════════════════════ -->
+<!-- ══ WINNER OVERLAY ══ -->
 <div id="wov">
   <div class="wbox">
     <div class="wtit" id="wtit"></div>
@@ -260,26 +228,23 @@
       <button class="bkbtn"            onclick="goMenu()">← Menu</button>
     </div>
   </div>
-  <!-- Replay Panel -->
   <div id="replayPanel" style="display:none">
     <div class="rp-title">📽 LỊCH SỬ NƯỚC ĐI</div>
     <div class="rp-list" id="rpList"></div>
     <div class="rp-ctrls">
       <button class="rp-btn" id="rpFirst" onclick="rpGo(0)">⏮</button>
       <button class="rp-btn" id="rpPrev"  onclick="rpStep(-1)">◀</button>
-      <span id="rpPos" style="font-size:11px;color:#556;letter-spacing:1px;min-width:50px;">0/0</span>
+      <span id="rpPos" style="font-size:11px;color:rgba(255,255,255,.3);letter-spacing:1px;min-width:50px;text-align:center;">0/0</span>
       <button class="rp-btn" id="rpNext"  onclick="rpStep(1)">▶</button>
       <button class="rp-btn" id="rpLast"  onclick="rpGo(-1)">⏭</button>
     </div>
-    <div style="margin-top:8px">
+    <div style="margin-top:10px">
       <button class="rp-btn" onclick="closeReplay()" style="width:100%">✕ Đóng</button>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     CHAT BOX (Online only)
-══════════════════════════════════════ -->
+<!-- ══ CHAT BOX ══ -->
 <div id="chatBox">
   <div class="chat-header" onclick="toggleChatBody()">
     <span class="chat-title">
@@ -303,7 +268,7 @@
       <button class="chat-qbtn" onclick="sendChatMsg('Good move!')">Good move!</button>
       <button class="chat-qbtn" onclick="sendChatMsg('Undo?')">Undo?</button>
       <button class="chat-qbtn" onclick="sendChatMsg('GG!')">GG!</button>
-      <button class="chat-qbtn" onclick="sendChatMsg('Thử đặt tường xem 😈')">😈 Troll</button>
+      <button class="chat-qbtn" onclick="sendChatMsg('😈 Troll')">😈 Troll</button>
     </div>
     <div class="chat-input-row">
       <input class="chat-input" id="chatInput" placeholder="Nhắn tin..." maxlength="80"
@@ -313,16 +278,7 @@
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     SCRIPTS — thứ tự load quan trọng!
-     1. constants  → định nghĩa hằng số, PU_DEFS, CHAOS_EVENTS
-     2. state      → khai báo tất cả biến state
-     3. game       → logic core (dùng constants + state)
-     4. renderer   → vẽ canvas (dùng state + game helpers)
-     5. ai         → engine AI (dùng game helpers)
-     6. online     → multiplayer (dùng game + ui helpers)
-     7. main       → navigation, launch, entry point (dùng tất cả)
-══════════════════════════════════════ -->
+<!-- ══ SCRIPTS ══ -->
 <script src="js/constants.js"></script>
 <script src="js/state.js"></script>
 <script src="js/game.js"></script>
