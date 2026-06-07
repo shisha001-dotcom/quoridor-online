@@ -40,6 +40,7 @@ function initGame() {
   fogRevealedWalls = { h: new Set(), v: new Set() };
   blindCounter = 0; blindHideUntil = -1;
   cancelAnimationFrame(raf);
+  if (typeof _aiSessionId !== 'undefined') _aiSessionId++; // cancel pending AI callbacks
   if (powerMode) spawnGift();
   updPUBar();
   setMode('move'); startTimer(); loop();
@@ -215,7 +216,7 @@ function endTurn(timeout = false) {
 
   if (gMode === 'ai' && cur === 'red') {
     clearInterval(tiv); updPanels();
-    const delay = diff === 'destroy' ? 600 : diff === 'hard' ? 400 : 250;
+    const delay = 80; // v5 async — delay nhỏ để UI render xong
     setTimeout(aiMove, delay);
   } else {
     startTimer();
